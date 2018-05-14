@@ -7,7 +7,9 @@ import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.logging.Level;
@@ -28,6 +30,7 @@ public class Connection {
     private int port;
     private short pid;
     private QPack qpack;
+    private Map<Short, CompletionHandler> completionHandlers;
 
     public Connection(String username, String password, String dbname, String host, int port) {
         this.channel = null;
@@ -36,8 +39,9 @@ public class Connection {
         this.dbname = dbname;
         this.host = host;
         this.port = port;
-        pid = 0;
+        pid = -1;
         qpack = new QPack();
+        completionHandlers = new HashMap<>();
     }
 
     /**
@@ -55,61 +59,104 @@ public class Connection {
         return result;
     }
 
-    private void channelReader(ByteBuffer readBuffer) {
-        readBuffer.clear();
-
-        channel.read(readBuffer, null, new CompletionHandler<Integer, Object>() {
+    private void channelReader() {
+        ByteBuffer headerBuffer = ByteBuffer.allocate(Package.HEADER_SIZE);
+        headerBuffer.clear();
+        channel.read(headerBuffer, null, new CompletionHandler<Integer, Object>() {
             @Override
             public void completed(Integer result, Object attachment) {
-                // buffer is ready for read
-                //readBuffer.flip();
-                System.out.println("result: " + Arrays.toString(readBuffer.array()));
-                readBuffer.clear();
+                if (result < 0) {
+                    // raise exception
+                    close();
+                    // TODO
+                } else if (headerBuffer.remaining() > 0) {
+                    channel.read(headerBuffer, null, this);
+                } else {
+                    // buffer is ready for read
+                    Package p = new Package(headerBuffer.array());
+                    if (p.getLength() == 0) {
+                        // packet without body
+                        channelReader();
+                    } else {
+                        ByteBuffer bodyBuffer = ByteBuffer.allocate(p.getLength());
+                        channel.read(bodyBuffer, p, new CompletionHandler<Integer, Object>() {
+                            @Override
+                            public void completed(Integer result, Object attachment) {
+                                System.out.println("result: " + result + " remaining: " + bodyBuffer.remaining());
+                                Package p = (Package) attachment;
+                                CompletionHandler handler = completionHandlers.remove(p.getPid());
+                                if (result < 0) {
+                                    // raise exception
+                                    close();
+                                    handler.failed(new Exception("End of stream"), attachment);
+                                } else if (bodyBuffer.remaining() > 0) {
+                                    channel.read(bodyBuffer, p, this);
+                                } else {
+                                    assert (p.getLength() == bodyBuffer.capacity());
+                                    p.setBody(bodyBuffer.array());
+                                    System.out.println(handler);
+                                    handler.completed(1, qpack.unpack(p.getBody()));
+                                    channelReader();
+                                }
+                            }
 
-                channelReader(readBuffer);
+                            @Override
+                            public void failed(Throwable exc, Object attachment) {
+                                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+                            }
+                        });
+                    }
+                }
             }
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                exc.printStackTrace();
+                try {
+                    channel.close();
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
             }
         });
     }
 
-    private void channelWrite(byte tp, Object data) {
+    private void channelWrite(byte tp, Object data, CompletionHandler handler) {
         pid++;
+        byte[] byteMap = new byte[]{};
         switch (tp) {
             case CPROTO_REQ_AUTH:
-                List<String> list = new ArrayList<>();
-                list.add(username);
-                list.add(password);
-                list.add(dbname);
-                byte[] byteMap = qpack.pack(list);
-                ByteBuffer writeBuffer = ByteBuffer.allocate(8 + byteMap.length);
-                writeBuffer.clear();
-                writeBuffer.put(toBytes(byteMap.length, 4)); // length
-                writeBuffer.put(toBytes(pid, 2)); // PID
-                writeBuffer.put(toBytes(tp, 1)); // tp
-                writeBuffer.put(toBytes(tp ^ 255, 1)); // inverted tp
-                writeBuffer.put(byteMap);
-                writeBuffer.flip();
-                
-                System.out.println(Arrays.toString(writeBuffer.array()));
-
-                channel.write(writeBuffer, null, new CompletionHandler() {
-                    @Override
-                    public void completed(Object result, Object attachment) {
-                        System.out.println("Success!");
-                    }
-
-                    @Override
-                    public void failed(Throwable exc, Object attachment) {
-                        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-                    }
-
-                });
+                List<String> aList = new ArrayList<>();
+                aList.add(username);
+                aList.add(password);
+                aList.add(dbname);
+                byteMap = qpack.pack(aList);
                 break;
+            case CPROTO_REQ_QUERY:
+                List<String> qList = new ArrayList<>();
+                qList.add((String) data);
+                qList.add(null);
+                byteMap = qpack.pack(qList);
+                break;
+            default:
+                throw new IllegalArgumentException("Invalid type " + tp);
         }
+
+        Package pck = new Package(byteMap.length, pid, tp, (byte) (tp ^ 255), byteMap);
+        completionHandlers.put(pid, handler);
+
+        channel.write(pck.toByteBuffer(), pck, new CompletionHandler() {
+            @Override
+            public void completed(Object result, Object attachment) {
+                System.out.printf("Write %d bytes\n", result);
+            }
+
+            @Override
+            public void failed(Throwable exc, Object attachment) {
+                completionHandlers.remove(((Package) attachment).getPid());
+                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+            }
+
+        });
     }
 
     public void connect(CompletionHandler completionHandler) {
@@ -119,8 +166,8 @@ public class Connection {
             Future future = channel.connect(address);
             future.get(); //returns null
             System.out.println("Connected: " + channel.isOpen());
-            channelReader(channel);
-            channelWrite((byte)CPROTO_REQ_AUTH, null);
+            channelReader();
+            channelWrite((byte) CPROTO_REQ_AUTH, null, null);
         } catch (IOException ex) {
             Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
         } catch (InterruptedException ex) {
@@ -132,10 +179,13 @@ public class Connection {
 
     public void close() {
         try {
-            channel.shutdownInput();
             channel.close();
         } catch (IOException ex) {
-            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
+            //Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
         }
+    }
+
+    public void query(String query, CompletionHandler handler) {
+        channelWrite((byte) CPROTO_REQ_QUERY, query, handler);
     }
 }

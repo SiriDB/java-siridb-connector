@@ -1,0 +1,32 @@
+package transceptor.technology;
+
+import java.util.Arrays;
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+/**
+ *
+ * @author Tristan Nottelman
+ */
+public class PackageTest {
+
+    private QPack qpack = new QPack();
+    
+    @Test
+    public void testPackageLength() {
+        Package pck = new Package(new byte[]{54, -27, 0, 0, 2, 0, 0, -1});
+        assertEquals(pck.getLength(), 58678);
+    }
+    
+    @Test
+    public void testPackageArray() {
+        
+        byte[] body = qpack.pack("select * from \"GOOGLE-FINANCE-IBM-CLOSE\"");
+        
+        Package pck = new Package(body.length, (short)0, (byte)3, (byte)(3 ^ 255), body);
+        
+        
+        System.out.println("arr: " + Arrays.toString(pck.toByteBuffer().array()));
+        
+    }
+}
