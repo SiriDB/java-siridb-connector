@@ -19,11 +19,17 @@ public class PackageTest {
     }
     
     @Test
+    public void testCheckbit() {
+        Package pck = new Package(0, (short)0, (byte)3, null);
+        assertEquals(pck.getId() ^ 255, pck.getCheckbit());
+    }
+    
+    @Test
     public void testPackageArray() {
         
         byte[] body = qpack.pack("select * from \"GOOGLE-FINANCE-IBM-CLOSE\"");
         
-        Package pck = new Package(body.length, (short)0, (byte)3, (byte)(3 ^ 255), body);
+        Package pck = new Package(body.length, (short)0, (byte)3, body);
         
         
         System.out.println("arr: " + Arrays.toString(pck.toByteBuffer().array()));

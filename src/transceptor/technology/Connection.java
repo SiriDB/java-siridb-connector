@@ -5,10 +5,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -28,10 +25,20 @@ public class Connection {
     private String dbname;
     private String host;
     private int port;
-    private short pid;
+    private short packageId;
     private QPack qpack;
     private Map<Short, CompletionHandler> completionHandlers;
 
+    /**
+     * Create a new instance of Connection with credentials, database name, host
+     * and port
+     *
+     * @param username
+     * @param password
+     * @param dbname
+     * @param host
+     * @param port
+     */
     public Connection(String username, String password, String dbname, String host, int port) {
         this.channel = null;
         this.username = username;
@@ -39,26 +46,14 @@ public class Connection {
         this.dbname = dbname;
         this.host = host;
         this.port = port;
-        pid = -1;
+        packageId = -1;
         qpack = new QPack();
         completionHandlers = new HashMap<>();
     }
 
     /**
-     * Converts a number into array of bytes
-     *
-     * @param number
-     * @param size
-     * @return
+     * This method handles the data input
      */
-    private byte[] toBytes(long number, int size) {
-        byte[] result = new byte[size];
-        for (int i = 0; i < size; i++) {
-            result[i] = (byte) (number >> (i * 8));
-        }
-        return result;
-    }
-
     private void channelReader() {
         ByteBuffer headerBuffer = ByteBuffer.allocate(Package.HEADER_SIZE);
         headerBuffer.clear();
@@ -66,13 +61,10 @@ public class Connection {
             @Override
             public void completed(Integer result, Object attachment) {
                 if (result < 0) {
-                    // raise exception
                     close();
-                    // TODO
                 } else if (headerBuffer.remaining() > 0) {
                     channel.read(headerBuffer, null, this);
                 } else {
-                    // buffer is ready for read
                     Package p = new Package(headerBuffer.array());
                     if (p.getLength() == 0) {
                         // packet without body
@@ -84,18 +76,33 @@ public class Connection {
                             public void completed(Integer result, Object attachment) {
                                 System.out.println("result: " + result + " remaining: " + bodyBuffer.remaining());
                                 Package p = (Package) attachment;
-                                CompletionHandler handler = completionHandlers.remove(p.getPid());
+                                CompletionHandler handler = completionHandlers.remove(p.getId());
+
+                                // checkbit
+                                if ((p.getId() ^ 255) - 255 != p.getCheckbit()) {
+                                    handler.failed(new InvalidPackageException("Invalid package, received pid "
+                                            + ((p.getId() ^ 255) - 255) + " but checkbit was "
+                                            + (p.getCheckbit())), attachment);
+                                }
                                 if (result < 0) {
-                                    // raise exception
+                                    // end of stream
                                     close();
                                     handler.failed(new Exception("End of stream"), attachment);
                                 } else if (bodyBuffer.remaining() > 0) {
                                     channel.read(bodyBuffer, p, this);
                                 } else {
-                                    assert (p.getLength() == bodyBuffer.capacity());
+                                    if (p.getLength() != bodyBuffer.capacity()) {
+                                        handler.failed(new InvalidPackageException("Invalid package, received "
+                                                + p.getLength() + "bytes but expected was "
+                                                + bodyBuffer.capacity()), attachment);
+                                    }
                                     p.setBody(bodyBuffer.array());
-                                    System.out.println(handler);
-                                    handler.completed(1, qpack.unpack(p.getBody()));
+                                    try {
+                                        Object o = qpack.unpack(p.getBody());
+                                        handler.completed(1, o);
+                                    } catch (Exception e) {
+                                        handler.failed(e, attachment);
+                                    }
                                     channelReader();
                                 }
                             }
@@ -120,72 +127,97 @@ public class Connection {
         });
     }
 
-    private void channelWrite(byte tp, Object data, CompletionHandler handler) {
-        pid++;
-        byte[] byteMap = new byte[]{};
-        switch (tp) {
-            case CPROTO_REQ_AUTH:
-                List<String> aList = new ArrayList<>();
-                aList.add(username);
-                aList.add(password);
-                aList.add(dbname);
-                byteMap = qpack.pack(aList);
-                break;
-            case CPROTO_REQ_QUERY:
-                List<String> qList = new ArrayList<>();
-                qList.add((String) data);
-                qList.add(null);
-                byteMap = qpack.pack(qList);
-                break;
-            default:
-                throw new IllegalArgumentException("Invalid type " + tp);
-        }
-
-        Package pck = new Package(byteMap.length, pid, tp, (byte) (tp ^ 255), byteMap);
-        completionHandlers.put(pid, handler);
+    /**
+     * This method handles the data written to SiriDB
+     *
+     * @param packageType
+     * @param data
+     * @param handler
+     */
+    private void channelWriter(byte packageType, byte[] data, CompletionHandler handler) {
+        packageId++;
+        Package pck = new Package(data.length, packageId, packageType, data);
+        completionHandlers.put(packageId, handler);
 
         channel.write(pck.toByteBuffer(), pck, new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
-                System.out.printf("Write %d bytes\n", result);
+                System.out.printf("ChannelWrite: write %d bytes\n", result);
             }
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                completionHandlers.remove(((Package) attachment).getPid());
+                completionHandlers.remove(((Package) attachment).getId());
                 throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
             }
 
         });
     }
 
-    public void connect(CompletionHandler completionHandler) {
+    /**
+     * Connect to SiriDB (authentication included)
+     *
+     * @param handler
+     */
+    public void connect(CompletionHandler handler) {
         try {
+            // connect to SiriDB
             channel = AsynchronousSocketChannel.open();
             InetSocketAddress address = new InetSocketAddress(host, port);
             Future future = channel.connect(address);
-            future.get(); //returns null
-            System.out.println("Connected: " + channel.isOpen());
+            if (future.get() != null) {
+                handler.failed(new Exception("Failed to connect"), null);
+            } //returns null if successful
+
+            // start channel reader
             channelReader();
-            channelWrite((byte) CPROTO_REQ_AUTH, null, null);
-        } catch (IOException ex) {
-            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (InterruptedException ex) {
-            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (ExecutionException ex) {
-            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
+
+            // authentication
+            channelWriter((byte) CPROTO_REQ_AUTH, qpack.pack(new String[]{username, password, dbname}), handler);
+        } catch (IOException | InterruptedException | ExecutionException ex) {
+            handler.failed(ex, null);
         }
     }
 
+    /**
+     * Closes the connection
+     */
     public void close() {
         try {
             channel.close();
         } catch (IOException ex) {
-            //Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
+    /**
+     * Insert into SiriDB
+     *
+     * @param query
+     * @param handler
+     */
+    public void insert(String query, CompletionHandler handler) {
+        channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(new String[]{query}), handler);
+    }
+
+    /**
+     * Perform a query on SiriDB
+     *
+     * @param query
+     * @param handler
+     */
     public void query(String query, CompletionHandler handler) {
-        channelWrite((byte) CPROTO_REQ_QUERY, query, handler);
+        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, null}), handler);
+    }
+
+    /**
+     * Perform a query on SiriDB with time precision
+     *
+     * @param query
+     * @param timePrecision
+     * @param handler
+     */
+    public void query(String query, int timePrecision, CompletionHandler handler) {
+        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, timePrecision + ""}), handler);
     }
 }

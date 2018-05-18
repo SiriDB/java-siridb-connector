@@ -5,49 +5,49 @@ package transceptor.technology;
  * @author Tristan Nottelman
  */
 
-class QueryError extends Exception {
-    public QueryError(String message) {
+class QueryErrorException extends Exception {
+    public QueryErrorException(String message) {
         super(message);
     }
 }
 
 
-class InsertError extends Exception {
-    public InsertError(String message) {
+class InsertErrorException extends Exception {
+    public InsertErrorException(String message) {
         super(message);
     }
 }
 
 
-class ServerError extends Exception {
-    public ServerError(String message) {
+class ServerErrorException extends Exception {
+    public ServerErrorException(String message) {
         super(message);
     }
 }
 
 
-class PoolError extends Exception {
-    public PoolError(String message) {
+class PoolErrorException extends Exception {
+    public PoolErrorException(String message) {
         super(message);
     }
 }
 
 
-class AuthenticationError extends Exception {
-    public AuthenticationError(String message) {
+class AuthenticationErrorException extends Exception {
+    public AuthenticationErrorException(String message) {
         super(message);
     }
 }
 
 
-class UserAuthError extends Exception {
-    public UserAuthError(String message) {
+class UserAuthErrorException extends Exception {
+    public UserAuthErrorException(String message) {
         super(message);
     }
 }
 
-class CorruptPackage extends Exception {
-    public CorruptPackage(String message) {
+class InvalidPackageException extends Exception {
+    public InvalidPackageException(String message) {
         super(message);
     }
 }

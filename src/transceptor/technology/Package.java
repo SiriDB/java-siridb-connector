@@ -12,24 +12,24 @@ public class Package {
 
     public static final int HEADER_SIZE = 8;
     private int length;
-    private short pid;
-    private byte tipe;
+    private short id;
+    private byte type;
     private byte checkbit;
     private byte[] body;
 
     public Package(byte[] payload) {
         this.length = convertByteToNumber(Arrays.copyOfRange(payload, 0, 4)).intValue();
-        this.pid = convertByteToNumber(Arrays.copyOfRange(payload, 4, 6)).shortValue();
-        this.tipe = payload[6];
+        this.id = convertByteToNumber(Arrays.copyOfRange(payload, 4, 6)).shortValue();
+        this.type = payload[6];
         this.checkbit = payload[7];
         this.body = null;
     }
 
-    public Package(int length, short pid, byte tipe, byte checkbit, byte[] body) {
+    public Package(int length, short id, byte type, byte[] body) {
         this.length = length;
-        this.pid = pid;
-        this.tipe = tipe;
-        this.checkbit = checkbit;
+        this.id = id;
+        this.type = type;
+        this.checkbit = (byte)(type ^ 255);
         this.body = body;
     }
 
@@ -42,8 +42,8 @@ public class Package {
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.clear();
         buffer.putInt(length);
-        buffer.putShort(pid);
-        buffer.put(tipe);
+        buffer.putShort(id);
+        buffer.put(type);
         buffer.put(checkbit);
         buffer.put(body);
         buffer.flip();
@@ -80,7 +80,11 @@ public class Package {
         return length;
     }
     
-    public short getPid() {
-        return pid;
+    public short getId() {
+        return id;
+    }
+    
+    public short getCheckbit() {
+        return checkbit;
     }
 }
