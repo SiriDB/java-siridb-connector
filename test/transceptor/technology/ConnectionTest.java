@@ -3,6 +3,7 @@ package transceptor.technology;
 import java.nio.channels.CompletionHandler;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -16,9 +17,6 @@ public class ConnectionTest {
 
     public ConnectionTest() {
         connection = new Connection("iris", "siri", "test", "localhost", 9000);
-    }
-
-    private void connect() {
         connection.connect(new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
@@ -36,7 +34,6 @@ public class ConnectionTest {
 
     @Test
     public void testQuery() throws InterruptedException {
-        connect();
         connection.query("select * from \"GOOGLE-FINANCE-IBM-CLOSE\"", new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
@@ -57,15 +54,15 @@ public class ConnectionTest {
 
     @Test
     public void testInsert() throws InterruptedException {
-        /*connect();
-        Map<String, String[]> map = new HashMap();
-        
-        map.put("GOOGLE-FINANCE-IBM-CLOSE", new String[][]{{0.5+"", System.currentTimeMillis()+""}});
-        connection.insert("insert GOOGLE-FINANCE-IBM-CLOSE", new CompletionHandler() {
+        Map<String, Number[][]> map = new HashMap();
+        Random random = new Random();
+
+        map.put("GOOGLE-FINANCE-IBM-CLOSE", new Number[][]{{System.currentTimeMillis(), ((random.nextInt(21) - 10) / 10.0)}});
+        connection.insert(map, new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
                 assertTrue(true);
-                System.out.println("Test: query written");
+                System.out.println("Test: insert written");
                 System.out.println("Result: " + attachment);
             }
 
@@ -76,6 +73,6 @@ public class ConnectionTest {
 
         });
         Thread.sleep(5000);
-        connection.close();*/
+        connection.close();
     }
 }

@@ -21,7 +21,7 @@ public class PackageTest {
     @Test
     public void testCheckbit() {
         Package pck = new Package(0, (short)0, (byte)3, null);
-        assertEquals(pck.getId() ^ 255, pck.getCheckbit());
+        assertTrue(pck.isValid());
     }
     
     @Test

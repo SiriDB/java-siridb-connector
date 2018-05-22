@@ -70,48 +70,7 @@ public class Connection {
                         // packet without body
                         channelReader();
                     } else {
-                        ByteBuffer bodyBuffer = ByteBuffer.allocate(p.getLength());
-                        channel.read(bodyBuffer, p, new CompletionHandler<Integer, Object>() {
-                            @Override
-                            public void completed(Integer result, Object attachment) {
-                                System.out.println("result: " + result + " remaining: " + bodyBuffer.remaining());
-                                Package p = (Package) attachment;
-                                CompletionHandler handler = completionHandlers.remove(p.getId());
-
-                                // checkbit
-                                if ((p.getId() ^ 255) - 255 != p.getCheckbit()) {
-                                    handler.failed(new InvalidPackageException("Invalid package, received pid "
-                                            + ((p.getId() ^ 255) - 255) + " but checkbit was "
-                                            + (p.getCheckbit())), attachment);
-                                }
-                                if (result < 0) {
-                                    // end of stream
-                                    close();
-                                    handler.failed(new Exception("End of stream"), attachment);
-                                } else if (bodyBuffer.remaining() > 0) {
-                                    channel.read(bodyBuffer, p, this);
-                                } else {
-                                    if (p.getLength() != bodyBuffer.capacity()) {
-                                        handler.failed(new InvalidPackageException("Invalid package, received "
-                                                + p.getLength() + "bytes but expected was "
-                                                + bodyBuffer.capacity()), attachment);
-                                    }
-                                    p.setBody(bodyBuffer.array());
-                                    try {
-                                        Object o = qpack.unpack(p.getBody());
-                                        handler.completed(1, o);
-                                    } catch (Exception e) {
-                                        handler.failed(e, attachment);
-                                    }
-                                    channelReader();
-                                }
-                            }
-
-                            @Override
-                            public void failed(Throwable exc, Object attachment) {
-                                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-                            }
-                        });
+                        bodyReader(p);
                     }
                 }
             }
@@ -128,6 +87,55 @@ public class Connection {
     }
 
     /**
+     * 
+     * @param p 
+     */
+    private void bodyReader(Package p) {
+        ByteBuffer bodyBuffer = ByteBuffer.allocate(p.getLength());
+        channel.read(bodyBuffer, p, new CompletionHandler<Integer, Object>() {
+            @Override
+            public void completed(Integer result, Object attachment) {
+                System.out.println("result: " + result + " remaining: " + bodyBuffer.remaining());
+                Package p = (Package) attachment;
+                CompletionHandler handler = completionHandlers.remove(p.getId());
+
+                // checkbit
+                if (!p.isValid()) {
+                    handler.failed(new InvalidPackageException("Invalid package, received type "
+                            + ((p.getType() ^ 255)) + " but checkbit was "
+                            + (p.getCheckbit())), attachment);
+                }
+                if (result < 0) {
+                    // end of stream
+                    close();
+                    handler.failed(new Exception("End of stream"), attachment);
+                } else if (bodyBuffer.remaining() > 0) {
+                    channel.read(bodyBuffer, p, this);
+                } else {
+                    if (p.getLength() != bodyBuffer.capacity()) {
+                        handler.failed(new InvalidPackageException("Invalid package, received "
+                                + p.getLength() + "bytes but expected was "
+                                + bodyBuffer.capacity()), attachment);
+                    }
+                    p.setBody(bodyBuffer.array());
+                    try {
+                        Object o = qpack.unpack(p.getBody());
+                        handler.completed(1, o);
+                    } catch (Exception e) {
+                        handler.failed(e, attachment);
+                    }
+                    channelReader();
+                }
+            }
+
+            @Override
+            public void failed(Throwable exc, Object attachment) {
+                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+            }
+        });
+    }
+
+    /**
      * This method handles the data written to SiriDB
      *
      * @param packageType
@@ -136,7 +144,9 @@ public class Connection {
      */
     private void channelWriter(byte packageType, byte[] data, CompletionHandler handler) {
         packageId++;
+        packageId = (short) (packageId % Short.MAX_VALUE);
         Package pck = new Package(data.length, packageId, packageType, data);
+
         completionHandlers.put(packageId, handler);
 
         channel.write(pck.toByteBuffer(), pck, new CompletionHandler() {
@@ -196,8 +206,8 @@ public class Connection {
      * @param query
      * @param handler
      */
-    public void insert(String query, CompletionHandler handler) {
-        channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(new String[]{query}), handler);
+    public void insert(Map map, CompletionHandler handler) {
+        channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(map), handler);
     }
 
     /**

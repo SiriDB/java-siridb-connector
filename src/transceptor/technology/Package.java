@@ -20,8 +20,8 @@ public class Package {
     public Package(byte[] payload) {
         this.length = convertByteToNumber(Arrays.copyOfRange(payload, 0, 4)).intValue();
         this.id = convertByteToNumber(Arrays.copyOfRange(payload, 4, 6)).shortValue();
-        this.type = payload[6];
-        this.checkbit = payload[7];
+        this.type = (byte) (payload[6]);
+        this.checkbit = (byte) (payload[7]);
         this.body = null;
     }
 
@@ -29,8 +29,12 @@ public class Package {
         this.length = length;
         this.id = id;
         this.type = type;
-        this.checkbit = (byte)(type ^ 255);
+        this.checkbit = (byte) (type ^ 255);
         this.body = body;
+    }
+
+    public boolean isValid() {
+        return (type == ((checkbit+256)^255));
     }
 
     public void setBody(byte[] body) {
@@ -71,7 +75,7 @@ public class Package {
         }
         return 0;
     }
-    
+
     public byte[] getBody() {
         return body;
     }
@@ -79,12 +83,16 @@ public class Package {
     public int getLength() {
         return length;
     }
-    
+
     public short getId() {
         return id;
     }
-    
+
     public short getCheckbit() {
         return checkbit;
+    }
+    
+    public byte getType() {
+        return type;
     }
 }
