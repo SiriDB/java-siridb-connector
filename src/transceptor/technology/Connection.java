@@ -5,6 +5,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -51,6 +52,52 @@ public class Connection {
         completionHandlers = new HashMap<>();
     }
 
+    public boolean isConnected() {
+        return channel.isOpen();
+    }
+
+    private void handleError(Object o, CompletionHandler handler, Object attachment, int type) {
+        switch (type) {
+            case CPROTO_ERR_MSG:
+                handler.failed(new Exception((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_QUERY:
+                handler.failed(new QueryErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_INSERT:
+                handler.failed(new InsertErrorException(
+                        (String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_SERVER:
+                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_POOL:
+                handler.failed(new PoolErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_USER_ACCESS:
+                handler.failed(new AuthenticationErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR:
+                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_NOT_AUTHENTICATED:
+                handler.failed(new AuthenticationErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_AUTH_CREDENTIALS:
+                handler.failed(new UserAuthErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_AUTH_UNKNOWN_DB:
+                handler.failed(new UserAuthErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_LOADING_DB:
+                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+            case CPROTO_ERR_FILE:
+                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
+                break;
+        }
+    }
+
     /**
      * This method handles the data input
      */
@@ -68,6 +115,8 @@ public class Connection {
                     Package p = new Package(headerBuffer.array());
                     if (p.getLength() == 0) {
                         // packet without body
+                        CompletionHandler handler = completionHandlers.remove(p.getId());
+                        handler.completed(1, null);
                         channelReader();
                     } else {
                         bodyReader(p);
@@ -77,18 +126,14 @@ public class Connection {
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                try {
-                    channel.close();
-                } catch (IOException ex) {
-                    ex.printStackTrace();
-                }
+                System.out.println("ChannelReader failed");
             }
         });
     }
 
     /**
-     * 
-     * @param p 
+     *
+     * @param p
      */
     private void bodyReader(Package p) {
         ByteBuffer bodyBuffer = ByteBuffer.allocate(p.getLength());
@@ -102,7 +147,7 @@ public class Connection {
                 // checkbit
                 if (!p.isValid()) {
                     handler.failed(new InvalidPackageException("Invalid package, received type "
-                            + ((p.getType() ^ 255)) + " but checkbit was "
+                            + (((p.getType() + 256) ^ 255)) + " but checkbit was "
                             + (p.getCheckbit())), attachment);
                 }
                 if (result < 0) {
@@ -118,11 +163,16 @@ public class Connection {
                                 + bodyBuffer.capacity()), attachment);
                     }
                     p.setBody(bodyBuffer.array());
+                    Object o = null;
                     try {
-                        Object o = qpack.unpack(p.getBody());
-                        handler.completed(1, o);
+                        o = qpack.unpack(p.getBody(), "utf-8");
                     } catch (Exception e) {
                         handler.failed(e, attachment);
+                    }
+                    if (p.getType() >= CPROTO_ERR_MSG) {
+                        handleError(o, handler, attachment, p.getType());
+                    } else {
+                        handler.completed(1, o);
                     }
                     channelReader();
                 }
@@ -157,10 +207,9 @@ public class Connection {
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                completionHandlers.remove(((Package) attachment).getId());
-                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+                CompletionHandler handler = completionHandlers.remove(((Package) attachment).getId());
+                handler.failed(exc, null);
             }
-
         });
     }
 
@@ -176,14 +225,16 @@ public class Connection {
             InetSocketAddress address = new InetSocketAddress(host, port);
             Future future = channel.connect(address);
             if (future.get() != null) {
-                handler.failed(new Exception("Failed to connect"), null);
+                handler.failed(new Exception("Failed to connect to "
+                        + host + ":" + port), null);
             } //returns null if successful
 
             // start channel reader
             channelReader();
 
             // authentication
-            channelWriter((byte) CPROTO_REQ_AUTH, qpack.pack(new String[]{username, password, dbname}), handler);
+            channelWriter((byte) CPROTO_REQ_AUTH,
+                    qpack.pack(new String[]{username, password, dbname}), handler);
         } catch (IOException | InterruptedException | ExecutionException ex) {
             handler.failed(ex, null);
         }
@@ -203,7 +254,7 @@ public class Connection {
     /**
      * Insert into SiriDB
      *
-     * @param query
+     * @param map
      * @param handler
      */
     public void insert(Map map, CompletionHandler handler) {

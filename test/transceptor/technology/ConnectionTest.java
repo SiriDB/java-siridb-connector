@@ -51,6 +51,26 @@ public class ConnectionTest {
         Thread.sleep(5000);
         connection.close();
     }
+    
+    @Test
+    public void testWrongQuery() throws InterruptedException {
+        connection.query("select * fom \"GOOGLE-FINANCE-IBM-CLOSE\"", new CompletionHandler() {
+            @Override
+            public void completed(Object result, Object attachment) {
+                assertTrue(true);
+                System.out.println("Test: query written");
+                System.out.println("Result: " + attachment);
+
+            }
+
+            @Override
+            public void failed(Throwable exc, Object attachment) {
+                assertTrue("Failed to execute query: " + exc.getMessage(), false);
+            }
+        });
+        Thread.sleep(5000);
+        connection.close();
+    }
 
     @Test
     public void testInsert() throws InterruptedException {
@@ -69,6 +89,10 @@ public class ConnectionTest {
             @Override
             public void failed(Throwable exc, Object attachment) {
                 assertTrue("Failed to execute insert: " + exc.getMessage(), false);
+
+                // doe dit in de reader als package een exception id bevat
+                // map met error_msg als key, value is error message
+                // runtimeexception als error message ontbreekt
             }
 
         });

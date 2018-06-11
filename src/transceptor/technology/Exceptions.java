@@ -33,14 +33,14 @@ class PoolErrorException extends Exception {
 }
 
 
-class AuthenticationErrorException extends Exception {
+class AuthenticationErrorException extends Exception { //niet geauthenticeerd
     public AuthenticationErrorException(String message) {
         super(message);
     }
 }
 
 
-class UserAuthErrorException extends Exception {
+class UserAuthErrorException extends Exception { //niet voldoende rechten
     public UserAuthErrorException(String message) {
         super(message);
     }
