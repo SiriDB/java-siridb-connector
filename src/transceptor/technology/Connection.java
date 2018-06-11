@@ -56,48 +56,6 @@ public class Connection {
         return channel.isOpen();
     }
 
-    private void handleError(Object o, CompletionHandler handler, Object attachment, int type) {
-        switch (type) {
-            case CPROTO_ERR_MSG:
-                handler.failed(new Exception((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_QUERY:
-                handler.failed(new QueryErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_INSERT:
-                handler.failed(new InsertErrorException(
-                        (String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_SERVER:
-                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_POOL:
-                handler.failed(new PoolErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_USER_ACCESS:
-                handler.failed(new AuthenticationErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR:
-                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_NOT_AUTHENTICATED:
-                handler.failed(new AuthenticationErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_AUTH_CREDENTIALS:
-                handler.failed(new UserAuthErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_AUTH_UNKNOWN_DB:
-                handler.failed(new UserAuthErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_LOADING_DB:
-                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-            case CPROTO_ERR_FILE:
-                handler.failed(new ServerErrorException((String) ((Map) o).get("error_msg")), attachment);
-                break;
-        }
-    }
-
     /**
      * This method handles the data input
      */
@@ -170,7 +128,8 @@ public class Connection {
                         handler.failed(e, attachment);
                     }
                     if (p.getType() >= CPROTO_ERR_MSG) {
-                        handleError(o, handler, attachment, p.getType());
+                        ErrorFactory f = new ErrorFactory();
+                        handler.failed(f.getErrorException(p.getType(), (String) ((Map) o).get("error_msg")), attachment);
                     } else {
                         handler.completed(1, o);
                     }
