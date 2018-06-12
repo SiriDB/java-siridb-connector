@@ -5,7 +5,6 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -18,7 +17,7 @@ import static transceptor.technology.ProtoMap.*;
  *
  * @author Tristan Nottelman
  */
-public class Connection {
+public class Connection implements ConnectionInterface {
 
     private AsynchronousSocketChannel channel;
     private String username;
@@ -177,6 +176,7 @@ public class Connection {
      *
      * @param handler
      */
+    @Override
     public void connect(CompletionHandler handler) {
         try {
             // connect to SiriDB
@@ -202,6 +202,7 @@ public class Connection {
     /**
      * Closes the connection
      */
+    @Override
     public void close() {
         try {
             channel.close();
@@ -216,6 +217,7 @@ public class Connection {
      * @param map
      * @param handler
      */
+    @Override
     public void insert(Map map, CompletionHandler handler) {
         channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(map), handler);
     }
@@ -226,6 +228,7 @@ public class Connection {
      * @param query
      * @param handler
      */
+    @Override
     public void query(String query, CompletionHandler handler) {
         channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, null}), handler);
     }
@@ -237,6 +240,7 @@ public class Connection {
      * @param timePrecision
      * @param handler
      */
+    @Override
     public void query(String query, int timePrecision, CompletionHandler handler) {
         channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, timePrecision + ""}), handler);
     }

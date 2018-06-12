@@ -3,15 +3,15 @@ package transceptor.technology;
 import java.nio.channels.CompletionHandler;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  *
  * @author tristan
  */
-public class Client {
+public class Client implements ConnectionInterface {
 
     private final List<Connection> connectionList;
     private final List<Connection> connectionPriorityList;
@@ -43,6 +43,7 @@ public class Client {
                 .get(rand.nextInt(l.size()));
     }
 
+    @Override
     public void connect(CompletionHandler handler) {
         for (String[] strings : hostlist) {
             Connection connection = new Connection(username, password, dbname, strings[0], Integer.parseInt(strings[1]));
@@ -57,15 +58,23 @@ public class Client {
             }
         }
     }
+    
+    @Override
+    public void insert(Map map, CompletionHandler handler) {
+        randomConnection().insert(map, handler);
+    }
 
+    @Override
     public void query(String query, CompletionHandler handler) {
         randomConnection().query(query, handler);
     }
 
+    @Override
     public void query(String query, int timePrecision, CompletionHandler handler) {
         randomConnection().query(query, timePrecision, handler);
     }
 
+    @Override
     public void close() {
         connectionList.forEach((connection) -> {
             connection.close();
