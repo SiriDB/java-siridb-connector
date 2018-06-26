@@ -1,0 +1,15 @@
+transceptor.technology.UserAuthError
+transceptor.technology.QueryError
+transceptor.technology.QueryErrorException
+transceptor.technology.ServerError
+transceptor.technology.ServerErrorException
+transceptor.technology.PoolErrorException
+transceptor.technology.InsertErrorException
+transceptor.technology.UserAuthErrorException
+transceptor.technology.InvalidPackageException
+transceptor.technology.InvalidPackage
+transceptor.technology.AuthenticationError
+transceptor.technology.InsertError
+transceptor.technology.PoolError
+transceptor.technology.AuthenticationErrorException
+transceptor.technology.CorruptPackage

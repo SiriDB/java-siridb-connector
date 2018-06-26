@@ -3,6 +3,7 @@ package transceptor.technology;
 import java.util.Arrays;
 import org.junit.Test;
 import static org.junit.Assert.*;
+import org.junit.BeforeClass;
 
 /**
  *
@@ -10,7 +11,13 @@ import static org.junit.Assert.*;
  */
 public class PackageTest {
 
-    private QPack qpack = new QPack();
+    private static QPack qpack;
+    private final String QUERY = "select * from \"GOOGLE-FINANCE-IBM-CLOSE\"";
+    
+    @BeforeClass
+    public static void setUpClass() {
+        qpack = new QPack();
+    }
     
     @Test
     public void testPackageLength() {
@@ -27,12 +34,10 @@ public class PackageTest {
     @Test
     public void testPackageArray() {
         
-        byte[] body = qpack.pack("select * from \"GOOGLE-FINANCE-IBM-CLOSE\"");
+        byte[] body = qpack.pack(QUERY);
         
         Package pck = new Package(body.length, (short)0, (byte)3, body);
         
-        
         System.out.println("arr: " + Arrays.toString(pck.toByteBuffer().array()));
-        
     }
 }

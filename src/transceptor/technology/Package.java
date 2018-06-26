@@ -8,16 +8,16 @@ import java.util.Arrays;
  *
  * @author Tristan Nottelman
  */
-public class Package {
+class Package {
 
     public static final int HEADER_SIZE = 8;
-    private int length;
-    private short id;
-    private byte type;
-    private byte checkbit;
+    private final int length;
+    private final short id;
+    private final byte type;
+    private final byte checkbit;
     private byte[] body;
 
-    public Package(byte[] payload) {
+    Package(byte[] payload) {
         this.length = convertByteToNumber(Arrays.copyOfRange(payload, 0, 4)).intValue();
         this.id = convertByteToNumber(Arrays.copyOfRange(payload, 4, 6)).shortValue();
         this.type = (byte) (payload[6]);
@@ -25,7 +25,7 @@ public class Package {
         this.body = null;
     }
 
-    public Package(int length, short id, byte type, byte[] body) {
+    Package(int length, short id, byte type, byte[] body) {
         this.length = length;
         this.id = id;
         this.type = type;
@@ -33,15 +33,15 @@ public class Package {
         this.body = body;
     }
 
-    public boolean isValid() {
-        return (type == ((checkbit+256)^255));
+    boolean isValid() {
+        return (type == ((checkbit + 256) ^ 255));
     }
 
-    public void setBody(byte[] body) {
+    void setBody(byte[] body) {
         this.body = body;
     }
 
-    public ByteBuffer toByteBuffer() {
+    ByteBuffer toByteBuffer() {
         ByteBuffer buffer = ByteBuffer.allocate(8 + length);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.clear();
@@ -49,17 +49,13 @@ public class Package {
         buffer.putShort(id);
         buffer.put(type);
         buffer.put(checkbit);
-        buffer.put(body);
+        if (getBody() != null) {
+            buffer.put(body);
+        }
         buffer.flip();
         return buffer;
     }
 
-    /**
-     * Converts array of bytes to number
-     *
-     * @param b byte array
-     * @return
-     */
     private Number convertByteToNumber(byte[] b) {
         ByteBuffer wrapped = ByteBuffer.wrap(b);
         wrapped.order(ByteOrder.LITTLE_ENDIAN);
@@ -76,23 +72,28 @@ public class Package {
         return 0;
     }
 
-    public byte[] getBody() {
+    byte[] getBody() {
         return body;
     }
 
-    public int getLength() {
+    int getLength() {
         return length;
     }
 
-    public short getId() {
+    short getId() {
         return id;
     }
 
-    public short getCheckbit() {
+    short getCheckbit() {
         return checkbit;
     }
-    
-    public byte getType() {
+
+    byte getType() {
         return type;
+    }
+    
+    @Override
+    public String toString() {
+        return Package.class + ": " + getLength() + ", " + getId() + ", " + getType() + ", " + getCheckbit() + ", " + Arrays.toString(getBody());
     }
 }
