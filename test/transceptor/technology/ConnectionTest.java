@@ -4,8 +4,10 @@ import java.nio.channels.CompletionHandler;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import org.junit.AfterClass;
 import org.junit.Test;
 import static org.junit.Assert.*;
+import org.junit.BeforeClass;
 
 /**
  *
@@ -13,15 +15,20 @@ import static org.junit.Assert.*;
  */
 public class ConnectionTest {
 
-    private Connection connection;
+    private static Connection connection;
+    private final String QUERY_WRONG = "select * fom \"GOOGLE-FINANCE-IBM-CLOSE\"";
+    private final String QUERY = "select * from \"GOOGLE-FINANCE-IBM-CLOSE\"";
+    private final String INSERT_SERIES = "GOOGLE-FINANCE-IBM-CLOSE";
 
-    public ConnectionTest() {
-        connection = new Connection("iris", "siri", "test", "localhost", 9000);
+    @BeforeClass
+    public static void setupClass() throws InterruptedException {
+        connection = new Connection("iris", "siri", "test", "localhost", 9000, true);
+
+        // Connect
         connection.connect(new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
-                System.out.println("Test");
-                assertTrue("Connected", true);
+                assertTrue("Connection OK", true);
             }
 
             @Override
@@ -29,47 +36,64 @@ public class ConnectionTest {
                 assertTrue("Failed to connect: " + exc.getMessage(), false);
             }
 
-        });
+        }, null);
+
+        Thread.sleep(1000);
+
+        // Auth
+        connection.authenticate(new CompletionHandler() {
+            @Override
+            public void completed(Object result, Object attachment) {
+                assertTrue("Authentication OK", true);
+            }
+
+            @Override
+            public void failed(Throwable exc, Object attachment) {
+                System.out.println("Authentication failed: " + exc.getMessage());
+                assertTrue("Authentication failed", false);
+            }
+        }, null);
+    }
+
+    @AfterClass
+    public static void tearDownClass() {
+        connection.close();
     }
 
     @Test
     public void testQuery() throws InterruptedException {
-        connection.query("select * from \"GOOGLE-FINANCE-IBM-CLOSE\"", new CompletionHandler() {
+        connection.query(QUERY, new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
-                assertTrue(true);
                 System.out.println("Test: query written");
-                System.out.println("Result: " + attachment);
-
+                System.out.println("Result: " + result);
+                System.out.println("Attachment: " + attachment);
+                assertTrue(true);
             }
 
             @Override
             public void failed(Throwable exc, Object attachment) {
                 assertTrue("Failed to execute query: " + exc.getMessage(), false);
             }
-        });
-        Thread.sleep(5000);
-        connection.close();
+        }, null);
+        Thread.sleep(1000);
     }
-    
+
     @Test
     public void testWrongQuery() throws InterruptedException {
-        connection.query("select * fom \"GOOGLE-FINANCE-IBM-CLOSE\"", new CompletionHandler() {
+        connection.query(QUERY_WRONG, new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
-                assertTrue(true);
-                System.out.println("Test: query written");
-                System.out.println("Result: " + attachment);
-
+                assertTrue(false);
             }
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                assertTrue("Failed to execute query: " + exc.getMessage(), false);
+                System.out.println("Query Wrong result: " + exc.getMessage());
+                assertEquals(exc.getClass(), QueryErrorException.class);
             }
-        });
+        }, null);
         Thread.sleep(5000);
-        connection.close();
     }
 
     @Test
@@ -77,26 +101,22 @@ public class ConnectionTest {
         Map<String, Number[][]> map = new HashMap();
         Random random = new Random();
 
-        map.put("GOOGLE-FINANCE-IBM-CLOSE", new Number[][]{{System.currentTimeMillis(), ((random.nextInt(21) - 10) / 10.0)}});
+        map.put(INSERT_SERIES, new Number[][]{{System.currentTimeMillis(), ((random.nextInt(21) - 10) / 10.0)}});
         connection.insert(map, new CompletionHandler() {
             @Override
             public void completed(Object result, Object attachment) {
-                assertTrue(true);
                 System.out.println("Test: insert written");
-                System.out.println("Result: " + attachment);
+                System.out.println("Result: " + result);
+                System.out.println("Attachment: " + attachment);
+                assertTrue(true);
             }
 
             @Override
             public void failed(Throwable exc, Object attachment) {
                 assertTrue("Failed to execute insert: " + exc.getMessage(), false);
-
-                // doe dit in de reader als package een exception id bevat
-                // map met error_msg als key, value is error message
-                // runtimeexception als error message ontbreekt
             }
 
-        });
+        }, null);
         Thread.sleep(5000);
-        connection.close();
     }
 }

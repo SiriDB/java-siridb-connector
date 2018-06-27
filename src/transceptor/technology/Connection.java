@@ -2,16 +2,25 @@ package transceptor.technology;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import static transceptor.technology.ProtoMap.*;
+
+class CompletionStore {
+
+    public CompletionStore(CompletionHandler completionHandler, Object attachment) {
+        this.completionHandler = completionHandler;
+        this.attachment = attachment;
+    }
+    CompletionHandler completionHandler;
+    Object attachment;
+}
 
 /**
  *
@@ -20,14 +29,16 @@ import static transceptor.technology.ProtoMap.*;
 public class Connection implements ConnectionInterface {
 
     private AsynchronousSocketChannel channel;
-    private String username;
-    private String password;
-    private String dbname;
-    private String host;
-    private int port;
+    private final String username;
+    private final String password;
+    private final String dbname;
+    private final String host;
+    private final int port;
     private short packageId;
-    private QPack qpack;
-    private Map<Short, CompletionHandler> completionHandlers;
+    private final QPack qpack;
+
+    private final Map<Short, CompletionStore> completionHandlers;
+    private final boolean keepAlive;
 
     /**
      * Create a new instance of Connection with credentials, database name, host
@@ -38,14 +49,16 @@ public class Connection implements ConnectionInterface {
      * @param dbname
      * @param host
      * @param port
+     * @param keepAlive
      */
-    public Connection(String username, String password, String dbname, String host, int port) {
+    public Connection(String username, String password, String dbname, String host, int port, boolean keepAlive) {
         this.channel = null;
         this.username = username;
         this.password = password;
         this.dbname = dbname;
         this.host = host;
         this.port = port;
+        this.keepAlive = keepAlive;
         packageId = -1;
         qpack = new QPack();
         completionHandlers = new HashMap<>();
@@ -70,11 +83,20 @@ public class Connection implements ConnectionInterface {
                     channel.read(headerBuffer, null, this);
                 } else {
                     Package p = new Package(headerBuffer.array());
+                    // checkbit
+                    if (!p.isValid()) {
+                        CompletionStore handler = completionHandlers.remove(p.getId());
+                        handler.completionHandler.failed(new InvalidPackageException("Invalid package, received type "
+                                + (((p.getType() + 256) ^ 255)) + " but checkbit was "
+                                + (p.getCheckbit())), handler.attachment);
+                        channelReader();
+                        return;
+                    }
                     if (p.getLength() == 0) {
                         // packet without body
-                        CompletionHandler handler = completionHandlers.remove(p.getId());
-                        handler.completed(1, null);
+                        handlePackage(p);
                         channelReader();
+                        
                     } else {
                         bodyReader(p);
                     }
@@ -83,7 +105,7 @@ public class Connection implements ConnectionInterface {
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                System.out.println("ChannelReader failed");
+                System.out.println("ChannelReader failed: " + exc.getMessage());
             }
         });
     }
@@ -97,41 +119,18 @@ public class Connection implements ConnectionInterface {
         channel.read(bodyBuffer, p, new CompletionHandler<Integer, Object>() {
             @Override
             public void completed(Integer result, Object attachment) {
-                System.out.println("result: " + result + " remaining: " + bodyBuffer.remaining());
                 Package p = (Package) attachment;
-                CompletionHandler handler = completionHandlers.remove(p.getId());
 
-                // checkbit
-                if (!p.isValid()) {
-                    handler.failed(new InvalidPackageException("Invalid package, received type "
-                            + (((p.getType() + 256) ^ 255)) + " but checkbit was "
-                            + (p.getCheckbit())), attachment);
-                }
                 if (result < 0) {
                     // end of stream
                     close();
-                    handler.failed(new Exception("End of stream"), attachment);
+                    CompletionStore handler = completionHandlers.remove(p.getId());
+                    handler.completionHandler.failed(new Exception("End of stream"), handler.attachment);
                 } else if (bodyBuffer.remaining() > 0) {
                     channel.read(bodyBuffer, p, this);
                 } else {
-                    if (p.getLength() != bodyBuffer.capacity()) {
-                        handler.failed(new InvalidPackageException("Invalid package, received "
-                                + p.getLength() + "bytes but expected was "
-                                + bodyBuffer.capacity()), attachment);
-                    }
                     p.setBody(bodyBuffer.array());
-                    Object o = null;
-                    try {
-                        o = qpack.unpack(p.getBody(), "utf-8");
-                    } catch (Exception e) {
-                        handler.failed(e, attachment);
-                    }
-                    if (p.getType() >= CPROTO_ERR_MSG) {
-                        ErrorFactory f = new ErrorFactory();
-                        handler.failed(f.getErrorException(p.getType(), (String) ((Map) o).get("error_msg")), attachment);
-                    } else {
-                        handler.completed(1, o);
-                    }
+                    handlePackage(p);
                     channelReader();
                 }
             }
@@ -150,12 +149,12 @@ public class Connection implements ConnectionInterface {
      * @param data
      * @param handler
      */
-    private void channelWriter(byte packageType, byte[] data, CompletionHandler handler) {
+    private void channelWriter(byte packageType, byte[] data, CompletionHandler handler, Object attachment) {
         packageId++;
         packageId = (short) (packageId % Short.MAX_VALUE);
         Package pck = new Package(data.length, packageId, packageType, data);
 
-        completionHandlers.put(packageId, handler);
+        completionHandlers.put(packageId, new CompletionStore(handler, attachment));
 
         channel.write(pck.toByteBuffer(), pck, new CompletionHandler() {
             @Override
@@ -165,38 +164,72 @@ public class Connection implements ConnectionInterface {
 
             @Override
             public void failed(Throwable exc, Object attachment) {
-                CompletionHandler handler = completionHandlers.remove(((Package) attachment).getId());
-                handler.failed(exc, null);
+                CompletionStore handler = completionHandlers.remove(((Package) attachment).getId());
+                handler.completionHandler.failed(exc, handler.attachment);
             }
         });
     }
 
+    private void handlePackage(Package p) {
+        CompletionStore handler = completionHandlers.remove(p.getId());
+
+        Object o = null;
+        if (p.getLength() > 0) {
+            try {
+                o = qpack.unpack(p.getBody(), "utf-8");
+            } catch (Exception e) {
+                handler.completionHandler.failed(e, handler.attachment);
+                return;
+            }
+        }
+
+        if (p.getType() >= CPROTO_ERR_MSG) {
+            ErrorFactory f = new ErrorFactory();
+            handler.completionHandler.failed(f.getErrorException(p.getType(), o), handler.attachment);
+        } else {
+            handler.completionHandler.completed(o, handler.attachment);
+        }
+    }
+
     /**
-     * Connect to SiriDB (authentication included)
+     * Connect to SiriDB
      *
      * @param handler
+     * @param attachment
      */
     @Override
-    public void connect(CompletionHandler handler) {
+    public void connect(CompletionHandler handler, Object attachment) {
         try {
             // connect to SiriDB
             channel = AsynchronousSocketChannel.open();
+            channel.setOption(StandardSocketOptions.SO_KEEPALIVE, keepAlive);
             InetSocketAddress address = new InetSocketAddress(host, port);
-            Future future = channel.connect(address);
-            if (future.get() != null) {
-                handler.failed(new Exception("Failed to connect to "
-                        + host + ":" + port), null);
-            } //returns null if successful
+            channel.connect(address, attachment, new CompletionHandler() {
+                @Override
+                public void completed(Object result, Object attachment) {
+                    channelReader();
+                    handler.completed(result, attachment);
+                }
 
-            // start channel reader
-            channelReader();
-
-            // authentication
-            channelWriter((byte) CPROTO_REQ_AUTH,
-                    qpack.pack(new String[]{username, password, dbname}), handler);
-        } catch (IOException | InterruptedException | ExecutionException ex) {
+                @Override
+                public void failed(Throwable exc, Object attachment) {
+                    handler.failed(exc, attachment);
+                }
+            });
+        } catch (IOException ex) {
             handler.failed(ex, null);
         }
+    }
+
+    /**
+     * Authenticate
+     *
+     * @param handler
+     * @param attachment
+     */
+    @Override
+    public void authenticate(CompletionHandler handler, Object attachment) {
+        channelWriter((byte) CPROTO_REQ_AUTH, qpack.pack(new String[]{username, password, dbname}), handler, attachment);
     }
 
     /**
@@ -205,9 +238,12 @@ public class Connection implements ConnectionInterface {
     @Override
     public void close() {
         try {
+            //channel.shutdownInput();
             channel.close();
+
         } catch (IOException ex) {
-            Logger.getLogger(Connection.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(Connection.class
+                    .getName()).log(Level.SEVERE, null, ex);
         }
     }
 
@@ -216,10 +252,11 @@ public class Connection implements ConnectionInterface {
      *
      * @param map
      * @param handler
+     * @param attachment
      */
     @Override
-    public void insert(Map map, CompletionHandler handler) {
-        channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(map), handler);
+    public void insert(Map map, CompletionHandler handler, Object attachment) {
+        channelWriter((byte) CPROTO_RES_INSERT, qpack.pack(map), handler, attachment);
     }
 
     /**
@@ -227,10 +264,11 @@ public class Connection implements ConnectionInterface {
      *
      * @param query
      * @param handler
+     * @param attachment
      */
     @Override
-    public void query(String query, CompletionHandler handler) {
-        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, null}), handler);
+    public void query(String query, CompletionHandler handler, Object attachment) {
+        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, null}), handler, attachment);
     }
 
     /**
@@ -239,9 +277,10 @@ public class Connection implements ConnectionInterface {
      * @param query
      * @param timePrecision
      * @param handler
+     * @param attachment
      */
     @Override
-    public void query(String query, int timePrecision, CompletionHandler handler) {
-        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, timePrecision + ""}), handler);
+    public void query(String query, int timePrecision, CompletionHandler handler, Object attachment) {
+        channelWriter((byte) CPROTO_REQ_QUERY, qpack.pack(new String[]{query, timePrecision + ""}), handler, attachment);
     }
 }
