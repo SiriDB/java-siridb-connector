@@ -1,0 +1,29 @@
+repo_name: SiriDB/java-siridb-connector
+report_id: eac4292cc025c4aa7311d4ab0c63b498
+version: 0.1
+repo_type: Public
+timestamp: '2023-12-27T20:00:29+00:00'
+requested_by: web-flow
+provider: github
+branch: master
+detected_tools_count: 2
+tools:
+- name: Java
+  description: A concurrent, class-based, object-oriented, language specifically designed
+    to have as few implementation dependencies as possible
+  website_url: https://www.java.com
+  open_source: true
+  hosted_saas: false
+  category: Languages & Frameworks
+  sub_category: Languages
+  image_url: https://img.stackshare.io/service/995/K85ZWV2F.png
+  detection_source: Repo Metadata
+- name: Git
+  description: Fast, scalable, distributed revision control system
+  website_url: http://git-scm.com/
+  open_source: true
+  hosted_saas: false
+  category: Build, Test, Deploy
+  sub_category: Version Control System
+  image_url: https://img.stackshare.io/service/1046/git.png
+  detection_source: Repo Metadata
